@@ -1,9 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
-
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({
@@ -50,69 +46,105 @@ export default async function handler(req, res) {
       });
     }
 
-    const request = {
-      model: "gemini-flash-latest",
-      contents,
-      config: {
-        systemInstruction: `
-          You are Habify AI, a friendly wellness information assistant.
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+    });
 
-          Help users understand:
-          - Sleep and hydration
-          - Nutrition and healthy eating
-          - Exercise and physical activity
-          - BMI and healthy habits
-          - General wellness questions
+    const config = {
+      systemInstruction: `
+        You are Habify AI, a friendly wellness information assistant.
 
-          Rules:
-          - Use simple, supportive language.
-          - Never claim to be a real doctor.
-          - Never diagnose medical conditions.
-          - Never prescribe medicines.
-          - Do not recommend changing prescribed medication.
-          - Explain that BMI is a screening measure, not a diagnosis.
-          - Encourage professional medical advice for personal concerns.
-          - For emergencies, advise immediate medical attention.
-        `,
-        temperature: 0.5,
-        maxOutputTokens: 500,
-      },
+        Help users understand:
+        - Sleep and hydration
+        - Nutrition and healthy eating
+        - Exercise and physical activity
+        - BMI and healthy habits
+        - General wellness questions
+
+        Rules:
+        - Use simple, supportive language.
+        - Never claim to be a real doctor.
+        - Never diagnose medical conditions.
+        - Never prescribe medicines.
+        - Do not recommend changing prescribed medication.
+        - Explain that BMI is a screening measure, not a diagnosis.
+        - Encourage professional medical advice for personal concerns.
+        - For emergencies, advise immediate medical attention.
+      `,
+      temperature: 0.5,
+      maxOutputTokens: 500,
     };
 
+    const models = [
+      "gemini-3.8-flash",
+      "gemini-3.5-flash-lite",
+    ];
 
     let response;
+    let lastError;
 
-for (let attempt = 0; attempt < 3; attempt++) {
-  try {
-    response = await ai.models.generateContent(request);
-    break;
-  } catch (error) {
-    const status = Number(
-      error?.status ?? error?.code ?? error?.error?.code
-    );
+    for (const model of models) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          response = await ai.models.generateContent({
+            model,
+            contents,
+            config,
+          });
 
-    const retryable =
-      [429, 500, 502, 503, 504].includes(status) ||
-      /overloaded|high demand|temporarily unavailable/i.test(
-        error?.message || ""
-      );
+          if (response.text) {
+            return res.status(200).json({
+              answer: response.text,
+            });
+          }
 
-    if (!retryable || attempt === 2) {
-      throw error;
+          throw new Error("Gemini returned an empty response.");
+        } catch (error) {
+          lastError = error;
+
+          const status = Number(
+            error?.status ??
+            error?.code ??
+            error?.error?.code ??
+            error?.cause?.status
+          );
+
+          const retryable =
+            [429, 500, 502, 503, 504].includes(status) ||
+            /overloaded|high demand|temporarily unavailable/i.test(
+              error?.message || ""
+            );
+
+          if (!retryable) {
+            throw error;
+          }
+
+          if (attempt === 0) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, 1000)
+            );
+          }
+        }
+      }
     }
 
-    await new Promise(resolve =>
-      setTimeout(resolve, 1000 * (2 ** attempt))
-    );
-  }
-}
-
-    return res.status(200).json({
-      answer: response.text || "Please try asking again.",
-    });
+    throw lastError;
 
   } catch (error) {
     console.error("Habify AI error:", error);
+
+    const status = Number(
+      error?.status ??
+      error?.code ??
+      error?.error?.code ??
+      error?.cause?.status
+    );
+
+    if ([429, 503, 504].includes(status)) {
+      return res.status(503).json({
+        error: "Habify AI is temporarily busy. Please try again shortly.",
+      });
+    }
 
     return res.status(500).json({
       error: "Unable to answer right now. Please try again.",
