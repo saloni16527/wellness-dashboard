@@ -50,7 +50,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const response = await ai.models.generateContent({
+    const request = {
       model: "gemini-3.8-flash",
       contents,
       config: {
@@ -77,7 +77,35 @@ export default async function handler(req, res) {
         temperature: 0.5,
         maxOutputTokens: 500,
       },
-    });
+    };
+
+
+    let response;
+
+for (let attempt = 0; attempt < 3; attempt++) {
+  try {
+    response = await ai.models.generateContent(request);
+    break;
+  } catch (error) {
+    const status = Number(
+      error?.status ?? error?.code ?? error?.error?.code
+    );
+
+    const retryable =
+      [429, 500, 502, 503, 504].includes(status) ||
+      /overloaded|high demand|temporarily unavailable/i.test(
+        error?.message || ""
+      );
+
+    if (!retryable || attempt === 2) {
+      throw error;
+    }
+
+    await new Promise(resolve =>
+      setTimeout(resolve, 1000 * (2 ** attempt))
+    );
+  }
+}
 
     return res.status(200).json({
       answer: response.text || "Please try asking again.",
