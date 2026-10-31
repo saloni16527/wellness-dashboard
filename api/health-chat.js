@@ -51,7 +51,7 @@ export default async function handler(req, res) {
     }
 
     const request = {
-      model: "gemini-3.8-flash",
+      model: "gemini-flash-latest",
       contents,
       config: {
         systemInstruction: `
