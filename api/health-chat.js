@@ -76,59 +76,46 @@ export default async function handler(req, res) {
     };
 
     const models = [
-      "gemini-3.8-flash",
-      "gemini-3.5-flash-lite",
-    ];
+  "gemini-3.8-flash",
+  "gemini-3.5-flash-lite",
+];
 
-    let response;
-    let lastError;
+let response;
+let lastError;
 
-    for (const model of models) {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          response = await ai.models.generateContent({
-            model,
-            contents,
-            config,
-          });
+for (const model of models) {
+  try {
+    response = await ai.models.generateContent({
+      model,
+      contents,
+      config,
+    });
 
-          if (response.text) {
-            return res.status(200).json({
-              answer: response.text,
-            });
-          }
-
-          throw new Error("Gemini returned an empty response.");
-        } catch (error) {
-          lastError = error;
-
-          const status = Number(
-            error?.status ??
-            error?.code ??
-            error?.error?.code ??
-            error?.cause?.status
-          );
-
-          const retryable =
-            [429, 500, 502, 503, 504].includes(status) ||
-            /overloaded|high demand|temporarily unavailable/i.test(
-              error?.message || ""
-            );
-
-          if (!retryable) {
-            throw error;
-          }
-
-          if (attempt === 0) {
-            await new Promise((resolve) =>
-              setTimeout(resolve, 1000)
-            );
-          }
-        }
-      }
+    if (response.text) {
+      return res.status(200).json({
+        answer: response.text,
+      });
     }
+  } catch (error) {
+    lastError = error;
 
-    throw lastError;
+    console.error(`Gemini model ${model} failed:`, error);
+
+    const status = Number(
+      error?.status ??
+      error?.code ??
+      error?.error?.code ??
+      error?.cause?.status
+    );
+
+    // Try the fallback only for temporary service errors.
+    if (![429, 500, 502, 503, 504].includes(status)) {
+      throw error;
+    }
+  }
+}
+
+throw lastError || new Error("No Gemini model returned a response.");
 
   } catch (error) {
     console.error("Habify AI error:", error);
